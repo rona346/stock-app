@@ -1,0 +1,6 @@
+{
+  "name": "StockAI - Smart Market Platform",
+  "description": "An AI-powered stock market simulator with real-time price updates, portfolio tracking, and Gemini-driven investment recommendations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

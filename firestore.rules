@@ -1,0 +1,140 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required) - Unique user ID
+    //   - email: string (required, email format) - User email
+    //   - displayName: string (optional) - User display name
+    //   - balance: number (required, positive) - Wallet balance
+    //   - createdAt: timestamp (required) - Creation time
+    //
+    // Collection: watchlists
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required) - Owner's user ID
+    //   - symbols: list (required) - List of stock symbols
+    //
+    // Collection: portfolios
+    // Document ID: auto-generated
+    // Fields:
+    //   - uid: string (required) - Owner's user ID
+    //   - symbol: string (required) - Stock symbol
+    //   - quantity: number (required, positive) - Shares owned
+    //   - averagePrice: number (required, positive) - Avg purchase price
+    //   - lastUpdated: timestamp (required) - Last update time
+    //
+    // Collection: transactions
+    // Document ID: auto-generated
+    // Fields:
+    //   - uid: string (required) - User ID
+    //   - symbol: string (required) - Stock symbol
+    //   - type: string (required, enum: BUY, SELL) - Transaction type
+    //   - quantity: number (required, positive) - Shares
+    //   - price: number (required, positive) - Price per share
+    //   - timestamp: timestamp (required) - Transaction time
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'photoURL','displayName', 'balance', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.balance is number && data.balance >= 0 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidWatchlist(data) {
+      return hasOnlyAllowedFields(['uid', 'symbols']) &&
+             data.uid == request.auth.uid &&
+             data.symbols is list;
+    }
+
+    function isValidPortfolioItem(data) {
+      return hasOnlyAllowedFields(['uid', 'symbol', 'quantity', 'averagePrice', 'lastUpdated']) &&
+             data.uid == request.auth.uid &&
+             data.symbol is string && data.symbol.size() > 0 &&
+             data.quantity is number && data.quantity >= 0 &&
+             data.averagePrice is number && data.averagePrice >= 0 &&
+             data.lastUpdated is timestamp;
+    }
+
+    function isValidTransaction(data) {
+      return hasOnlyAllowedFields(['uid', 'symbol', 'type', 'quantity', 'price', 'timestamp']) &&
+             data.uid == request.auth.uid &&
+             data.symbol is string && data.symbol.size() > 0 &&
+             data.type in ['BUY', 'SELL'] &&
+             data.quantity is number && data.quantity > 0 &&
+             data.price is number && data.price >= 0 &&
+             data.timestamp is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    match /watchlists/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidWatchlist(request.resource.data);
+      allow update: if isOwner(userId) && isValidWatchlist(request.resource.data);
+    }
+
+    match /portfolios/{portfolioId} {
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow create: if isAuthenticated() && isValidPortfolioItem(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.uid == request.auth.uid && isValidPortfolioItem(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
+      // Transactions are usually immutable
+      allow update, delete: if false;
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

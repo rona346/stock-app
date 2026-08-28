@@ -30,13 +30,14 @@ const Dashboard: React.FC<{
   recommendation: AIRecommendation | null;
   onAutoInvest: () => void;
   loadingAI: boolean;
+  aiError: string | null;
   onRefreshAI: () => void;
   watchlist: string[];
   onToggleWatchlist: (s: string) => void;
-  onBuy: (s: StockData) => void;
-  onSell: (s: StockData) => void;
+  onBuy: (s: StockData, quantity: number) => void;
+  onSell: (s: StockData, quantity: number) => void;
   searchQuery: string;
-}> = ({ user, stocks, allStocks, portfolio, recommendation, onAutoInvest,  onRefreshAI,loadingAI, watchlist, onToggleWatchlist, onBuy, onSell, searchQuery }) => {
+}> = ({ user, stocks, allStocks, portfolio, recommendation, onAutoInvest,  onRefreshAI, aiError, loadingAI, watchlist, onToggleWatchlist, onBuy, onSell, searchQuery }) => {
   const totalInvested = portfolio.reduce((acc, item) => acc + (item.quantity * item.averagePrice), 0);
   const currentValue = portfolio.reduce((acc, item) => {
     const stock = allStocks.find(s => s.symbol === item.symbol);
@@ -129,6 +130,12 @@ const Dashboard: React.FC<{
               AI Smart Recommendation
             </span>
           </div>
+
+          {aiError && (
+            <div className="mt-4 bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-sm">
+              {aiError}
+            </div>
+          )}
 
           <button
             onClick={onRefreshAI}

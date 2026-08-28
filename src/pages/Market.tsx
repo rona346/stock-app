@@ -6,8 +6,8 @@ const Market: React.FC<{
   stocks: StockData[]; 
   watchlist: string[]; 
   onToggleWatchlist: (s: string) => void;
-  onBuy: (s: StockData) => void;
-  onSell: (s: StockData) => void;
+  onBuy: (s: StockData, quantity: number) => void;
+  onSell: (s: StockData, quantity: number) => void;
 }> = ({ stocks, watchlist, onToggleWatchlist, onBuy, onSell }) => {
   return (
     <div className="p-8">

@@ -98,25 +98,39 @@ async function startServer() {
     const { stocks } = req.body;
 
     if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
-      return res.status(400).json({ error: "Invalid stock data provided" });
+      return res.status(400).json({
+        error: "Invalid stock data provided",
+      });
     }
 
     try {
       const apiKey = process.env.GEMINI_API_KEY;
+
       if (!apiKey) {
-        console.warn("GEMINI_API_KEY is not configured on the server. Falling back to momentum-based recommendation.");
-        throw new Error("GEMINI_API_KEY is missing");
+        return res.status(500).json({
+          error: "GEMINI_API_KEY is not configured on the server.",
+        });
       }
 
       const ai = getGoogleGenAI();
-      const stockSummary = stocks.map((s: any) => `${s.symbol} (${s.name}): Price ₹${s.price.toFixed(2)}, Change ${s.changePercent.toFixed(2)}%`).join('\n');
+
+      const stockSummary = stocks
+        .map(
+          (s: any) =>
+            `${s.symbol} (${s.name}): Price ₹${Number(s.price).toFixed(
+              2
+            )}, Change ${Number(s.changePercent).toFixed(2)}%`
+        )
+        .join("\n");
 
       const prompt = `
-        Analyze the following stock data and provide a single recommendation for the best stock to invest in right now.
+        Analyze the following stock data and provide a single recommendation
+        for the best stock to invest in right now.
+
         Current Market Data:
         ${stockSummary}
 
-        Provide your response in JSON format with the following structure:
+        Provide your response in JSON format with this structure:
         {
           "symbol": "STOCK_SYMBOL",
           "name": "STOCK_NAME",
@@ -138,11 +152,14 @@ async function startServer() {
               name: { type: Type.STRING },
               confidence: { type: Type.NUMBER },
               reason: { type: Type.STRING },
-              trend: { type: Type.STRING, enum: ["UP", "DOWN", "STABLE"] }
+              trend: {
+                type: Type.STRING,
+                enum: ["UP", "DOWN", "STABLE"],
+              },
             },
-            required: ["symbol", "name", "confidence", "reason", "trend"]
-          }
-        }
+            required: ["symbol", "name", "confidence", "reason", "trend"],
+          },
+        },
       });
 
       if (!response.text) {
@@ -150,18 +167,28 @@ async function startServer() {
       }
 
       const recommendation = JSON.parse(response.text);
-      res.json(recommendation);
-    } catch (error) {
+
+      return res.json(recommendation);
+    } catch (error: any) {
       console.error("Server AI Recommendation Error:", error);
-      
-      // Fallback logic if AI fails or key is missing
-      const bestStock = stocks.reduce((prev: any, current: any) => (prev.changePercent > current.changePercent) ? prev : current);
-      res.json({
-        symbol: bestStock.symbol,
-        name: bestStock.name,
-        confidence: 75,
-        reason: "Based on current positive momentum and price trend analysis (server-side fallback).",
-        trend: "UP"
+
+      const status = error?.status ?? error?.error?.code;
+
+      if (status === 429) {
+        return res.status(429).json({
+          error: "Gemini API quota exceeded. Please try again later.",
+        });
+      }
+
+      if (status === 401 || status === 403) {
+        return res.status(status).json({
+          error:
+            "Gemini API authentication/permission error. Check GEMINI_API_KEY.",
+        });
+      }
+
+      return res.status(502).json({
+        error: "Gemini AI recommendation failed.",
       });
     }
   });

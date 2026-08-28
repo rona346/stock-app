@@ -110,12 +110,14 @@ service cloud.firestore {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
       allow update: if isOwner(userId) && isValidUser(request.resource.data);
+      allow delete: if isOwner(userId);
     }
 
     match /watchlists/{userId} {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId) && isValidWatchlist(request.resource.data);
       allow update: if isOwner(userId) && isValidWatchlist(request.resource.data);
+      allow delete: if isOwner(userId);
     }
 
     match /portfolios/{portfolioId} {
@@ -128,8 +130,10 @@ service cloud.firestore {
     match /transactions/{transactionId} {
       allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
       allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
-      // Transactions are usually immutable
-      allow update, delete: if false;
+      // Transactions are normally immutable, but users can delete
+      // their own transaction history when resetting their account.
+      allow update: if false;
+      allow delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
     }
 
     // Default deny

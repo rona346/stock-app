@@ -1,23 +1,38 @@
-import React from 'react';
-import { motion } from 'motion/react';
-import { TrendingUp, TrendingDown, Star, StarOff, ShoppingCart, DollarSign } from 'lucide-react';
-import { StockData } from '../types';
-import { StockChart } from './StockChart';
+import React, { useState } from "react";
+import { motion } from "motion/react";
+import {
+  TrendingUp,
+  TrendingDown,
+  Star,
+  StarOff,
+  ShoppingCart,
+  DollarSign,
+} from "lucide-react";
+import { StockData } from "../types";
+import { StockChart } from "./StockChart";
 
 interface StockCardProps {
   stock: StockData;
   isWatchlisted: boolean;
   onToggleWatchlist: (symbol: string) => void;
-  onBuy: (stock: StockData) => void;
-  onSell: (stock: StockData) => void;
+  onBuy: (stock: StockData, quantity: number) => void;
+  onSell: (stock: StockData, quantity: number) => void;
 }
 
-export const StockCard: React.FC<StockCardProps> = ({ stock, isWatchlisted, onToggleWatchlist, onBuy, onSell }) => {
+export const StockCard: React.FC<StockCardProps> = ({
+  stock,
+  isWatchlisted,
+  onToggleWatchlist,
+  onBuy,
+  onSell,
+}) => {
   const isPositive = stock.change >= 0;
-  const color = isPositive ? '#10b981' : '#ef4444';
+  const [quantity, setQuantity] = useState<number | "">(1);
+  const selectedQuantity = quantity === "" ? 0 : quantity;
+  const color = isPositive ? "#10b981" : "#ef4444";
 
   return (
-    <motion.div 
+    <motion.div
       layout
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
@@ -25,10 +40,14 @@ export const StockCard: React.FC<StockCardProps> = ({ stock, isWatchlisted, onTo
     >
       <div className="flex justify-between items-start mb-4">
         <div>
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white">{stock.symbol}</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{stock.name}</p>
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+            {stock.symbol}
+          </h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {stock.name}
+          </p>
         </div>
-        <button 
+        <button
           onClick={() => onToggleWatchlist(stock.symbol)}
           className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         >
@@ -42,10 +61,19 @@ export const StockCard: React.FC<StockCardProps> = ({ stock, isWatchlisted, onTo
 
       <div className="flex items-end justify-between mb-6">
         <div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">₹{stock.price.toFixed(2)}</p>
-          <div className={`flex items-center text-sm font-medium ${isPositive ? 'text-emerald-500' : 'text-rose-500'}`}>
-            {isPositive ? <TrendingUp className="w-4 h-4 mr-1" /> : <TrendingDown className="w-4 h-4 mr-1" />}
-            {isPositive ? '+' : ''}{stock.change.toFixed(2)} ({stock.changePercent.toFixed(2)}%)
+          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+            ₹{stock.price.toFixed(2)}
+          </p>
+          <div
+            className={`flex items-center text-sm font-medium ${isPositive ? "text-emerald-500" : "text-rose-500"}`}
+          >
+            {isPositive ? (
+              <TrendingUp className="w-4 h-4 mr-1" />
+            ) : (
+              <TrendingDown className="w-4 h-4 mr-1" />
+            )}
+            {isPositive ? "+" : ""}
+            {stock.change.toFixed(2)} ({stock.changePercent.toFixed(2)}%)
           </div>
         </div>
         <div className="w-32 h-12">
@@ -53,16 +81,43 @@ export const StockCard: React.FC<StockCardProps> = ({ stock, isWatchlisted, onTo
         </div>
       </div>
 
+      <div className="flex items-center justify-between mb-3">
+        <label className="text-sm font-medium text-gray-600 dark:text-gray-300">
+          Quantity
+        </label>
+
+        <input
+          type="number"
+          min="1"
+          value={quantity}
+          onChange={(e) => {
+            const value = e.target.value;
+
+            if (value === '') {
+              setQuantity('');
+              return;
+            }
+
+            const parsedValue = Number(value);
+
+            if (!Number.isNaN(parsedValue)) {
+              setQuantity(Math.max(1, parsedValue));
+            }
+          }}
+          className="w-24 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-center"
+        />
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
-        <button 
-          onClick={() => onBuy(stock)}
+        <button
+          onClick={() => onBuy(stock, selectedQuantity)}
           className="flex items-center justify-center py-2 px-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-semibold transition-colors"
         >
           <ShoppingCart className="w-4 h-4 mr-2" />
           Buy
         </button>
-        <button 
-          onClick={() => onSell(stock)}
+        <button
+          onClick={() => onSell(stock, selectedQuantity)}
           className="flex items-center justify-center py-2 px-4 bg-rose-500 hover:bg-rose-600 text-white rounded-xl font-semibold transition-colors"
         >
           <DollarSign className="w-4 h-4 mr-2" />

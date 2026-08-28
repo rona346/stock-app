@@ -478,50 +478,123 @@ export default function App() {
 
   const handleSell = async (stock: StockData, amount?: number) => {
     if (!user) return;
+
     const existing = portfolio.find((p) => p.symbol === stock.symbol);
+
     if (!existing || existing.quantity <= 0) return;
+
+    const userRef = doc(db, "users", user.uid);
+    const portfolioRef = doc(db, "portfolios", existing.id!);
+
     const sellQuantity = Math.min(
       amount ?? existing.quantity,
       existing.quantity,
     );
 
-    const totalGain = stock.price * sellQuantity;
-    const remainingQuantity = existing.quantity - sellQuantity;
-    const newBalance = user.balance + totalGain;
+    try {
+      await runTransaction(db, async (transaction) => {
+        // 1. Read latest user data
+        const userSnapshot = await transaction.get(userRef);
 
-    // Update User Balance
-    await setDoc(doc(db, "users", user.uid), { ...user, balance: newBalance });
-    setUser((prev) => (prev ? { ...prev, balance: newBalance } : null));
+        if (!userSnapshot.exists()) {
+          throw new Error("User account not found.");
+        }
 
-    // Update or remove portfolio holding
-    if (remainingQuantity > 0) {
-      await setDoc(doc(db, "portfolios", existing.id!), {
-        uid: existing.uid,
-        symbol: existing.symbol,
-        quantity: remainingQuantity,
-        averagePrice: existing.averagePrice,
-        lastUpdated: Timestamp.now(),
+        const userData = userSnapshot.data() as UserProfile;
+
+        // 2. Read latest portfolio data
+        const portfolioSnapshot = await transaction.get(portfolioRef);
+
+        if (!portfolioSnapshot.exists()) {
+          throw new Error("Portfolio holding not found.");
+        }
+
+        const portfolioData = portfolioSnapshot.data();
+
+        const currentQuantity = Number(portfolioData.quantity ?? 0);
+
+        if (currentQuantity <= 0) {
+          throw new Error("No shares available to sell.");
+        }
+
+        // 3. Make sure we don't sell more than currently owned
+        const quantityToSell = Math.min(
+          sellQuantity,
+          currentQuantity,
+        );
+
+        const totalGain = stock.price * quantityToSell;
+        const newBalance = userData.balance + totalGain;
+        const remainingQuantity = currentQuantity - quantityToSell;
+
+        // 4. Update balance
+        transaction.set(
+          userRef,
+          {
+            ...userData,
+            balance: newBalance,
+          },
+          { merge: true },
+        );
+
+        // 5. Update or delete portfolio
+        if (remainingQuantity > 0) {
+          transaction.set(
+            portfolioRef,
+            {
+              uid: portfolioData.uid,
+              symbol: portfolioData.symbol,
+              quantity: remainingQuantity,
+              averagePrice: portfolioData.averagePrice,
+              lastUpdated: Timestamp.now(),
+            },
+            { merge: true },
+          );
+        } else {
+          transaction.delete(portfolioRef);
+        }
+
+        // 6. Record SELL transaction
+        const sellTxRef = doc(collection(db, "transactions"));
+
+        transaction.set(sellTxRef, {
+          uid: user.uid,
+          symbol: stock.symbol,
+          type: "SELL",
+          quantity: quantityToSell,
+          price: stock.price,
+          timestamp: Timestamp.now(),
+        });
       });
-    } else {
-      await deleteDoc(doc(db, "portfolios", existing.id!));
+
+      // Update React state only after successful transaction
+      const totalGain = stock.price * sellQuantity;
+      const newBalance = user.balance + totalGain;
+
+      setUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              balance: newBalance,
+            }
+          : null,
+      );
+
+      setNotifications((prev) => [
+        `Successfully sold ${sellQuantity} shares of ${stock.symbol} at ₹${stock.price.toFixed(2)}`,
+        ...prev,
+      ]);
+    } catch (error) {
+      console.error("Sell transaction failed:", error);
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to complete sale.";
+
+      alert(message);
     }
-
-    // Record Transaction
-    const sellTx = {
-      uid: user.uid,
-      symbol: stock.symbol,
-      type: "SELL",
-      quantity: sellQuantity,
-      price: stock.price,
-      timestamp: Timestamp.now(),
-    };
-    await addDoc(collection(db, "transactions"), sellTx);
-    setNotifications((prev) => [
-      `Successfully sold ${sellQuantity} shares of ${stock.symbol} at ₹${stock.price.toFixed(2)}`,
-      ...prev,
-    ]);
   };
-
   const handleAutoInvest = async () => {
     if (!user || !recommendation) return;
     const stock = stocks.find((s) => s.symbol === recommendation.symbol);

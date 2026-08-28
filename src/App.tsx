@@ -381,55 +381,99 @@ export default function App() {
   };
 
   const handleBuy = async (stock: StockData, amount: number = 1) => {
-    if (!user || user.balance < stock.price * amount) {
-      alert("Insufficient balance!");
-      return;
-    }
+    if (!user) return;
 
-    const totalCost = stock.price * amount;
-    const newBalance = user.balance - totalCost;
+    const userRef = doc(db, "users", user.uid);
 
-    // Update User Balance
-    await setDoc(doc(db, "users", user.uid), { ...user, balance: newBalance });
-    setUser((prev) => (prev ? { ...prev, balance: newBalance } : null));
+    try {
+      await runTransaction(db, async (transaction) => {
+        // 1. Read latest user data from Firestore
+        const userSnapshot = await transaction.get(userRef);
 
-    // Update Portfolio
-    const existing = portfolio.find((p) => p.symbol === stock.symbol);
-    if (existing) {
-      const newQty = existing.quantity + amount;
-      const newAvg =
-        (existing.quantity * existing.averagePrice + totalCost) / newQty;
-      await setDoc(doc(db, "portfolios", existing.id!), {
-        uid: existing.uid,
-        symbol: existing.symbol,
-        quantity: newQty,
-        averagePrice: newAvg,
-        lastUpdated: Timestamp.now(),
+        if (!userSnapshot.exists()) {
+          throw new Error("User account not found.");
+        }
+
+        const userData = userSnapshot.data() as UserProfile;
+
+        const totalCost = stock.price * amount;
+
+        // 2. Validate latest balance
+        if (userData.balance < totalCost) {
+          throw new Error("Insufficient balance!");
+        }
+
+        const newBalance = userData.balance - totalCost;
+
+        // 3. Find the existing portfolio holding
+        const existing = portfolio.find((p) => p.symbol === stock.symbol);
+
+        // 4. Update user balance
+        transaction.set(userRef, { balance: newBalance }, { merge: true });
+
+        // 5. Update or create portfolio holding
+        if (existing) {
+          const portfolioRef = doc(db, "portfolios", existing.id!);
+
+          const newQty = existing.quantity + amount;
+
+          const newAvg =
+            (existing.quantity * existing.averagePrice + totalCost) / newQty;
+
+          transaction.set(portfolioRef, {
+            uid: existing.uid,
+            symbol: existing.symbol,
+            quantity: newQty,
+            averagePrice: newAvg,
+            lastUpdated: Timestamp.now(),
+          });
+        } else {
+          const portfolioRef = doc(collection(db, "portfolios"));
+
+          transaction.set(portfolioRef, {
+            uid: user.uid,
+            symbol: stock.symbol,
+            quantity: amount,
+            averagePrice: stock.price,
+            lastUpdated: Timestamp.now(),
+          });
+        }
+
+        // 6. Record the BUY transaction
+        const buyTxRef = doc(collection(db, "transactions"));
+
+        transaction.set(buyTxRef, {
+          uid: user.uid,
+          symbol: stock.symbol,
+          type: "BUY",
+          quantity: amount,
+          price: stock.price,
+          timestamp: Timestamp.now(),
+        });
       });
-    } else {
-      await addDoc(collection(db, "portfolios"), {
-        uid: user.uid,
-        symbol: stock.symbol,
-        quantity: amount,
-        averagePrice: stock.price,
-        lastUpdated: Timestamp.now(),
-      });
-    }
 
-    // Record Transaction
-    const buyTx = {
-      uid: user.uid,
-      symbol: stock.symbol,
-      type: "BUY",
-      quantity: amount,
-      price: stock.price,
-      timestamp: Timestamp.now(),
-    };
-    await addDoc(collection(db, "transactions"), buyTx);
-    setNotifications((prev) => [
-      `Successfully purchased ${amount} shares of ${stock.symbol} at ₹${stock.price.toFixed(2)}`,
-      ...prev,
-    ]);
+      // 7. Update React state only after transaction succeeds
+      setUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              balance: prev.balance - stock.price * amount,
+            }
+          : null,
+      );
+
+      setNotifications((prev) => [
+        `Successfully purchased ${amount} shares of ${stock.symbol} at ₹${stock.price.toFixed(2)}`,
+        ...prev,
+      ]);
+    } catch (error) {
+      console.error("Buy transaction failed:", error);
+
+      const message =
+        error instanceof Error ? error.message : "Failed to complete purchase.";
+
+      alert(message);
+    }
   };
 
   const handleSell = async (stock: StockData, amount?: number) => {

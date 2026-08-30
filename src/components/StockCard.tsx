@@ -59,24 +59,28 @@ export const StockCard: React.FC<StockCardProps> = ({
         </button>
       </div>
 
-      <div className="flex items-end justify-between mb-6">
-        <div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+      <div className="flex items-start justify-between mb-6 min-w-0">
+        <div className="min-w-0 flex-1 pr-2">
+          <p className="text-2xl font-bold text-gray-900 dark:text-white whitespace-nowrap">
             ₹{stock.price.toFixed(2)}
           </p>
+
           <div
-            className={`flex items-center text-sm font-medium ${isPositive ? "text-emerald-500" : "text-rose-500"}`}
+            className={`flex items-center text-sm font-medium ${
+              isPositive ? "text-emerald-500" : "text-rose-500"
+            }`}
           >
             {isPositive ? (
-              <TrendingUp className="w-4 h-4 mr-1" />
+              <TrendingUp className="w-4 h-4 mr-1 shrink-0" />
             ) : (
-              <TrendingDown className="w-4 h-4 mr-1" />
+              <TrendingDown className="w-4 h-4 mr-1 shrink-0" />
             )}
             {isPositive ? "+" : ""}
             {stock.change.toFixed(2)} ({stock.changePercent.toFixed(2)}%)
           </div>
         </div>
-        <div className="w-24 h-12 shrink-0 overflow-hidden ml-3">
+
+        <div className="w-16 h-12 shrink-0 overflow-hidden ml-2">
           <StockChart data={stock.history} color={color} height={48} />
         </div>
       </div>

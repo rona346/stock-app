@@ -74,6 +74,11 @@ export default function App() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [notifications, setNotifications] = useState<string[]>([]);
+  const activeTradesRef = useRef<Set<string>>(new Set());
+  const getCanonicalPortfolioId = (uid: string, symbol: string) =>
+    `${uid}_${symbol}`;
+  const isValidTradeQuantity = (quantity: number) =>
+    Number.isInteger(quantity) && quantity > 0;
 
   // Persist theme preference
   useEffect(() => {
@@ -383,11 +388,27 @@ export default function App() {
   const handleBuy = async (stock: StockData, amount: number = 1) => {
     if (!user) return;
 
+    if (!isValidTradeQuantity(amount)) {
+      alert("Quantity must be a whole number greater than 0.");
+      return;
+    }
+
+    const tradeKey = `BUY:${stock.symbol}`;
+
+    if (activeTradesRef.current.has(tradeKey)) {
+      alert("A buy transaction is already in progress.");
+      return;
+    }
+
+    activeTradesRef.current.add(tradeKey);
+
     const userRef = doc(db, "users", user.uid);
+    const portfolioId = getCanonicalPortfolioId(user.uid, stock.symbol);
+    const portfolioRef = doc(db, "portfolios", portfolioId);
 
     try {
       await runTransaction(db, async (transaction) => {
-        // 1. Read latest user data from Firestore
+        // 1. Read latest user data
         const userSnapshot = await transaction.get(userRef);
 
         if (!userSnapshot.exists()) {
@@ -395,7 +416,6 @@ export default function App() {
         }
 
         const userData = userSnapshot.data() as UserProfile;
-
         const totalCost = stock.price * amount;
 
         // 2. Validate latest balance
@@ -403,43 +423,50 @@ export default function App() {
           throw new Error("Insufficient balance!");
         }
 
-        const newBalance = userData.balance - totalCost;
+        // 3. Read canonical portfolio document
+        const portfolioSnapshot = await transaction.get(portfolioRef);
 
-        // 3. Find the existing portfolio holding
-        const existing = portfolio.find((p) => p.symbol === stock.symbol);
+        let currentQuantity = 0;
+        let currentInvestedValue = 0;
 
-        // 4. Update user balance
-        transaction.set(userRef, { balance: newBalance }, { merge: true });
+        if (portfolioSnapshot.exists()) {
+          const portfolioData = portfolioSnapshot.data();
 
-        // 5. Update or create portfolio holding
-        if (existing) {
-          const portfolioRef = doc(db, "portfolios", existing.id!);
+          currentQuantity = Number(portfolioData.quantity ?? 0);
+          const averagePrice = Number(portfolioData.averagePrice ?? 0);
 
-          const newQty = existing.quantity + amount;
-
-          const newAvg =
-            (existing.quantity * existing.averagePrice + totalCost) / newQty;
-
-          transaction.set(portfolioRef, {
-            uid: existing.uid,
-            symbol: existing.symbol,
-            quantity: newQty,
-            averagePrice: newAvg,
-            lastUpdated: Timestamp.now(),
-          });
-        } else {
-          const portfolioRef = doc(collection(db, "portfolios"));
-
-          transaction.set(portfolioRef, {
-            uid: user.uid,
-            symbol: stock.symbol,
-            quantity: amount,
-            averagePrice: stock.price,
-            lastUpdated: Timestamp.now(),
-          });
+          currentInvestedValue = currentQuantity * averagePrice;
         }
 
-        // 6. Record the BUY transaction
+        const newQuantity = currentQuantity + amount;
+        const newInvestedValue = currentInvestedValue + totalCost;
+
+        const newAveragePrice =
+          newQuantity > 0 ? newInvestedValue / newQuantity : stock.price;
+
+        // 4. Update balance
+        transaction.set(
+          userRef,
+          {
+            balance: userData.balance - totalCost,
+          },
+          { merge: true },
+        );
+
+        // 5. Update/create canonical portfolio holding
+        transaction.set(
+          portfolioRef,
+          {
+            uid: user.uid,
+            symbol: stock.symbol,
+            quantity: newQuantity,
+            averagePrice: newAveragePrice,
+            lastUpdated: Timestamp.now(),
+          },
+          { merge: true },
+        );
+
+        // 6. Record BUY transaction
         const buyTxRef = doc(collection(db, "transactions"));
 
         transaction.set(buyTxRef, {
@@ -452,7 +479,7 @@ export default function App() {
         });
       });
 
-      // 7. Update React state only after transaction succeeds
+      // 7. Update React state only after success
       setUser((prev) =>
         prev
           ? {
@@ -473,25 +500,38 @@ export default function App() {
         error instanceof Error ? error.message : "Failed to complete purchase.";
 
       alert(message);
+    } finally {
+      activeTradesRef.current.delete(tradeKey);
     }
   };
-
   const handleSell = async (stock: StockData, amount?: number) => {
     if (!user) return;
 
-    const existing = portfolio.find((p) => p.symbol === stock.symbol);
+    // Validate provided quantity
+    if (amount !== undefined && !isValidTradeQuantity(amount)) {
+      alert("Quantity must be a whole number greater than 0.");
+      return;
+    }
 
-    if (!existing || existing.quantity <= 0) return;
+    const tradeKey = `SELL:${stock.symbol}`;
+
+    if (activeTradesRef.current.has(tradeKey)) {
+      alert("A sell transaction is already in progress.");
+      return;
+    }
+
+    activeTradesRef.current.add(tradeKey);
 
     const userRef = doc(db, "users", user.uid);
-    const portfolioRef = doc(db, "portfolios", existing.id!);
 
-    const sellQuantity = Math.min(
-      amount ?? existing.quantity,
-      existing.quantity,
-    );
+    const portfolioId = getCanonicalPortfolioId(user.uid, stock.symbol);
+
+    const portfolioRef = doc(db, "portfolios", portfolioId);
 
     try {
+      let soldQuantity = 0;
+      let newBalance = 0;
+
       await runTransaction(db, async (transaction) => {
         // 1. Read latest user data
         const userSnapshot = await transaction.get(userRef);
@@ -506,55 +546,67 @@ export default function App() {
         const portfolioSnapshot = await transaction.get(portfolioRef);
 
         if (!portfolioSnapshot.exists()) {
-          throw new Error("Portfolio holding not found.");
+          throw new Error("No shares available to sell.");
         }
 
         const portfolioData = portfolioSnapshot.data();
 
         const currentQuantity = Number(portfolioData.quantity ?? 0);
 
-        if (currentQuantity <= 0) {
+        if (!Number.isInteger(currentQuantity) || currentQuantity <= 0) {
           throw new Error("No shares available to sell.");
         }
 
-        // 3. Make sure we don't sell more than currently owned
-        const quantityToSell = Math.min(
-          sellQuantity,
-          currentQuantity,
-        );
+        // 3. If amount is undefined => Sell All
+        const quantityToSell = amount === undefined ? currentQuantity : amount;
+
+        // 4. Never allow selling more than owned
+        if (quantityToSell > currentQuantity) {
+          throw new Error(
+            `Insufficient holdings! You only own ${currentQuantity} shares of ${stock.symbol}.`,
+          );
+        }
+
+        if (!isValidTradeQuantity(quantityToSell)) {
+          throw new Error("Quantity must be a whole number greater than 0.");
+        }
+
+        soldQuantity = quantityToSell;
 
         const totalGain = stock.price * quantityToSell;
-        const newBalance = userData.balance + totalGain;
+
+        newBalance = userData.balance + totalGain;
+
         const remainingQuantity = currentQuantity - quantityToSell;
 
-        // 4. Update balance
+        // 5. Update user balance
         transaction.set(
           userRef,
           {
-            ...userData,
             balance: newBalance,
           },
           { merge: true },
         );
 
-        // 5. Update or delete portfolio
+        // 6. Update or delete portfolio
         if (remainingQuantity > 0) {
           transaction.set(
             portfolioRef,
             {
-              uid: portfolioData.uid,
-              symbol: portfolioData.symbol,
+              uid: user.uid,
+              symbol: stock.symbol,
               quantity: remainingQuantity,
-              averagePrice: portfolioData.averagePrice,
+              averagePrice: Number(portfolioData.averagePrice ?? stock.price),
               lastUpdated: Timestamp.now(),
             },
             { merge: true },
           );
         } else {
+          // Sell All
           transaction.delete(portfolioRef);
         }
 
-        // 6. Record SELL transaction
+        // 7. Record SELL transaction
         const sellTxRef = doc(collection(db, "transactions"));
 
         transaction.set(sellTxRef, {
@@ -567,10 +619,7 @@ export default function App() {
         });
       });
 
-      // Update React state only after successful transaction
-      const totalGain = stock.price * sellQuantity;
-      const newBalance = user.balance + totalGain;
-
+      // 8. Update local React state only after success
       setUser((prev) =>
         prev
           ? {
@@ -581,18 +630,18 @@ export default function App() {
       );
 
       setNotifications((prev) => [
-        `Successfully sold ${sellQuantity} shares of ${stock.symbol} at ₹${stock.price.toFixed(2)}`,
+        `Successfully sold ${soldQuantity} shares of ${stock.symbol} at ₹${stock.price.toFixed(2)}`,
         ...prev,
       ]);
     } catch (error) {
       console.error("Sell transaction failed:", error);
 
       const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to complete sale.";
+        error instanceof Error ? error.message : "Failed to complete sale.";
 
       alert(message);
+    } finally {
+      activeTradesRef.current.delete(tradeKey);
     }
   };
   const handleAutoInvest = async () => {

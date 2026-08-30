@@ -53,10 +53,6 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isDocOwner() {
-      return isAuthenticated() && request.auth.uid == resource.data.uid;
-    }
-
     function isValidEmail(email) {
       return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
     }
@@ -87,7 +83,8 @@ service cloud.firestore {
       return hasOnlyAllowedFields(['uid', 'symbol', 'quantity', 'averagePrice', 'lastUpdated']) &&
              data.uid == request.auth.uid &&
              data.symbol is string && data.symbol.size() > 0 &&
-             data.quantity is number && data.quantity >= 0 &&
+             data.quantity is number && data.quantity >= 0 && 
+             data.quantity % 1 == 0 &&
              data.averagePrice is number && data.averagePrice >= 0 &&
              data.lastUpdated is timestamp;
     }
@@ -98,6 +95,7 @@ service cloud.firestore {
              data.symbol is string && data.symbol.size() > 0 &&
              data.type in ['BUY', 'SELL'] &&
              data.quantity is number && data.quantity > 0 &&
+             data.quantity % 1 == 0 &&
              data.price is number && data.price >= 0 &&
              data.timestamp is timestamp;
     }
@@ -121,12 +119,22 @@ service cloud.firestore {
     }
 
     match /portfolios/{portfolioId} {
-      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
-      allow create: if isAuthenticated() && isValidPortfolioItem(request.resource.data);
-      allow update: if isAuthenticated() && resource.data.uid == request.auth.uid && isValidPortfolioItem(request.resource.data);
-      allow delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
-    }
+      allow read: if isAuthenticated() &&
+        (
+          !exists(/databases/$(database)/documents/portfolios/$(portfolioId)) ||
+          resource.data.uid == request.auth.uid
+        );
 
+      allow create: if isAuthenticated() &&
+        isValidPortfolioItem(request.resource.data);
+
+      allow update: if isAuthenticated() &&
+        resource.data.uid == request.auth.uid &&
+        isValidPortfolioItem(request.resource.data);
+
+      allow delete: if isAuthenticated() &&
+        resource.data.uid == request.auth.uid;
+    }
     match /transactions/{transactionId} {
       allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
       allow create: if isAuthenticated() && isValidTransaction(request.resource.data);

@@ -239,10 +239,6 @@ export default function App() {
     };
 
     fetchAI();
-
-    const aiInterval = setInterval(fetchAI, 60000);
-
-    return () => clearInterval(aiInterval);
   }, [user, stocks.length]);
 
   const refreshAIRecommendation = async () => {

@@ -3,7 +3,7 @@ dotenv.config({ path: ".env.local" });
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
-import * as yahooFinanceModule from 'yahoo-finance2';
+import * as yahooFinanceModule from "yahoo-finance2";
 import { GoogleGenAI, Type } from "@google/genai";
 
 let aiClient: GoogleGenAI | null = null;
@@ -17,20 +17,23 @@ function getGoogleGenAI(): GoogleGenAI {
       apiKey,
       httpOptions: {
         headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
+          "User-Agent": "aistudio-build",
+        },
+      },
     });
   }
   return aiClient;
 }
 
 // Access YahooFinance from the module, handling different import styles
-const YahooFinance = (yahooFinanceModule as any).YahooFinance || (yahooFinanceModule as any).default?.YahooFinance || (yahooFinanceModule as any).default;
+const YahooFinance =
+  (yahooFinanceModule as any).YahooFinance ||
+  (yahooFinanceModule as any).default?.YahooFinance ||
+  (yahooFinanceModule as any).default;
 
 let yahooFinance: any;
 try {
-  if (typeof YahooFinance === 'function') {
+  if (typeof YahooFinance === "function") {
     yahooFinance = new YahooFinance();
     console.log("YahooFinance initialized as a class instance.");
   } else {
@@ -42,29 +45,30 @@ try {
 }
 
 const fallbackStocks = [
-  { symbol: 'RELIANCE', name: 'Reliance Industries', basePrice: 2950 },
-  { symbol: 'TCS', name: 'Tata Consultancy Services', basePrice: 4100 },
-  { symbol: 'INFY', name: 'Infosys', basePrice: 1650 },
-  { symbol: 'HDFCBANK', name: 'HDFC Bank', basePrice: 1450 },
-  { symbol: 'ICICIBANK', name: 'ICICI Bank', basePrice: 1080 },
-  { symbol: 'WIPRO', name: 'Wipro', basePrice: 480 },
-  { symbol: 'TATAMOTORS', name: 'Tata Motors', basePrice: 950 },
-  { symbol: 'ADANIENT', name: 'Adani Enterprises', basePrice: 3200 },
-  { symbol: 'SBIN', name: 'State Bank of India', basePrice: 780 },
-  { symbol: 'ITC', name: 'ITC Limited', basePrice: 420 },
+  { symbol: "RELIANCE", name: "Reliance Industries", basePrice: 2950 },
+  { symbol: "TCS", name: "Tata Consultancy Services", basePrice: 4100 },
+  { symbol: "INFY", name: "Infosys", basePrice: 1650 },
+  { symbol: "HDFCBANK", name: "HDFC Bank", basePrice: 1450 },
+  { symbol: "ICICIBANK", name: "ICICI Bank", basePrice: 1080 },
+  { symbol: "WIPRO", name: "Wipro", basePrice: 480 },
+  { symbol: "TATAMOTORS", name: "Tata Motors", basePrice: 950 },
+  { symbol: "ADANIENT", name: "Adani Enterprises", basePrice: 3200 },
+  { symbol: "SBIN", name: "State Bank of India", basePrice: 780 },
+  { symbol: "ITC", name: "ITC Limited", basePrice: 420 },
 ];
 
 function generateSimulatedStocks() {
-  return fallbackStocks.map(stock => {
+  return fallbackStocks.map((stock) => {
     const history = Array.from({ length: 7 }, (_, i) => {
       const date = new Date(Date.now() - (7 - i) * 24 * 60 * 60 * 1000);
-      const rand = Math.sin(i + stock.basePrice) * 0.02 + (Math.random() - 0.5) * 0.01;
+      const rand =
+        Math.sin(i + stock.basePrice) * 0.02 + (Math.random() - 0.5) * 0.01;
       return {
-        time: date.toLocaleDateString([], { month: 'short', day: 'numeric' }),
-        price: Number((stock.basePrice * (1 + rand)).toFixed(2))
+        time: date.toLocaleDateString([], { month: "short", day: "numeric" }),
+        price: Number((stock.basePrice * (1 + rand)).toFixed(2)),
       };
     });
-    
+
     const currentPrice = history[history.length - 1].price;
     const prevPrice = history[history.length - 2].price;
     const change = Number((currentPrice - prevPrice).toFixed(2));
@@ -76,14 +80,14 @@ function generateSimulatedStocks() {
       price: currentPrice,
       change,
       changePercent,
-      history
+      history,
     };
   });
 }
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Support parsing JSON request bodies
   app.use(express.json());
@@ -118,8 +122,8 @@ async function startServer() {
         .map(
           (s: any) =>
             `${s.symbol} (${s.name}): Price ₹${Number(s.price).toFixed(
-              2
-            )}, Change ${Number(s.changePercent).toFixed(2)}%`
+              2,
+            )}, Change ${Number(s.changePercent).toFixed(2)}%`,
         )
         .join("\n");
 
@@ -197,56 +201,78 @@ async function startServer() {
   app.get("/api/stocks", async (req, res) => {
     console.log("Fetching stock data for symbols...");
     const symbols = [
-      'RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 
-      'WIPRO.NS', 'HCLTECH.NS', 'ADANIENT.NS', 'SBIN.NS', 'ITC.NS'
+      "RELIANCE.NS",
+      "TCS.NS",
+      "INFY.NS",
+      "HDFCBANK.NS",
+      "ICICIBANK.NS",
+      "WIPRO.NS",
+      "HCLTECH.NS",
+      "ADANIENT.NS",
+      "SBIN.NS",
+      "ITC.NS",
     ];
 
     try {
-      const results = await Promise.all(symbols.map(async (symbol) => {
-        try {
-          // Use the quote method directly from the default export
-          const quote: any = await yahooFinance.quote(symbol);
-          const history: any[] = await yahooFinance.historical(symbol, {
-            period1: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            period2: new Date().toISOString().split('T')[0],
-            interval: '1d'
-          });
+      const results = await Promise.all(
+        symbols.map(async (symbol) => {
+          try {
+            // Use the quote method directly from the default export
+            const quote: any = await yahooFinance.quote(symbol);
+            const history: any[] = await yahooFinance.historical(symbol, {
+              period1: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              period2: new Date().toISOString().split("T")[0],
+              interval: "1d",
+            });
 
-          return {
-            symbol: symbol.replace('.NS', ''),
-            name: quote.longName || symbol,
-            price: quote.regularMarketPrice || 0,
-            change: quote.regularMarketChange || 0,
-            changePercent: quote.regularMarketChangePercent || 0,
-            history: history.map((h: any) => ({
-              time: new Date(h.date).toLocaleDateString([], { month: 'short', day: 'numeric' }),
-              price: h.close
-            }))
-          };
-        } catch (err) {
-          console.warn(`Failed to fetch data for ${symbol}:`, err instanceof Error ? err.message : err);
-          return null;
-        }
-      }));
+            return {
+              symbol: symbol.replace(".NS", ""),
+              name: quote.longName || symbol,
+              price: quote.regularMarketPrice || 0,
+              change: quote.regularMarketChange || 0,
+              changePercent: quote.regularMarketChangePercent || 0,
+              history: history.map((h: any) => ({
+                time: new Date(h.date).toLocaleDateString([], {
+                  month: "short",
+                  day: "numeric",
+                }),
+                price: h.close,
+              })),
+            };
+          } catch (err) {
+            console.error(
+              `Failed to fetch data for ${symbol}:`,
+              err instanceof Error ? err.stack : err,
+            );
+            return null;
+          }
+        }),
+      );
 
       // Filter out failed fetches
-      const validResults = results.filter(r => r !== null);
+      const validResults = results.filter((r) => r !== null);
       if (validResults.length > 0) {
         res.json(validResults);
       } else {
-        console.warn("All Yahoo Finance fetches failed or empty, returning simulated stock data fallback.");
-        res.json(generateSimulatedStocks());
+        console.error("All Yahoo Finance fetches failed.");
+        res.status(502).json({
+          error: "Unable to fetch real stock data from Yahoo Finance.",
+        });
       }
     } catch (error) {
       console.error("Stock API Error:", error);
-      res.json(generateSimulatedStocks());
+      res.status(502).json({
+        error: "Unable to fetch real stock data from Yahoo Finance.",
+      });
     }
   });
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { 
+      server: {
         middlewareMode: true,
         hmr: false, // Explicitly disable HMR to prevent WebSocket errors in this environment
       },
@@ -254,16 +280,15 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
-    console.log(`Health check: http://localhost:${PORT}/api/health`);
+    console.log(`Server running on port ${PORT}`);
   });
 }
 

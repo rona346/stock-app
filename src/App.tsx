@@ -43,7 +43,6 @@ import Orders from "./pages/Orders";
 import { Sidebar } from "./components/Sidebar";
 import { Navbar } from "./components/Navbar";
 import { AuthForm } from "./components/AuthForm";
-import { generateInitialStockData } from "./services/stockService";
 import { getAIRecommendation } from "./services/aiService";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -64,6 +63,9 @@ export default function App() {
 
   const [stocks, setStocks] = useState<StockData[]>([]);
   const latestStocksRef = useRef<StockData[]>([]);
+  useEffect(() => {
+    latestStocksRef.current = stocks;
+  }, [stocks]);
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioItem[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -179,35 +181,25 @@ export default function App() {
     const fetchStocks = async () => {
       try {
         const response = await fetch("/api/stocks");
-        if (!response.ok) throw new Error("Failed to fetch stocks");
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch stocks");
+        }
+
         const data = await response.json();
 
-        if (data && data.length > 0) {
+        if (Array.isArray(data) && data.length > 0) {
           setStocks(data);
         } else {
-          console.warn(
-            "Stock API returned empty data, falling back to simulation.",
-          );
-          if (stocks.length === 0) {
-            setStocks(generateInitialStockData());
-          }
+          console.warn("Stock API returned no real market data.");
         }
       } catch (error) {
         console.error("Stock Fetch Error:", error);
-        // Fallback to simulation if API fails
-        if (stocks.length === 0) {
-          setStocks(generateInitialStockData());
-        }
       }
     };
 
     fetchStocks();
-    const interval = setInterval(fetchStocks, 30000); // Update every 30 seconds
-    return () => clearInterval(interval);
   }, []);
-  useEffect(() => {
-    latestStocksRef.current = stocks;
-  }, [stocks]);
 
   // AI Recommendation Trigger
   useEffect(() => {
@@ -242,6 +234,8 @@ export default function App() {
   }, [user, stocks.length]);
 
   const refreshAIRecommendation = async () => {
+    console.log("Refresh AI button clicked");
+    console.log("Current stocks:", latestStocksRef.current);
     const currentStocks = latestStocksRef.current;
 
     if (currentStocks.length === 0) return;

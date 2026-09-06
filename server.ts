@@ -38,6 +38,31 @@ async function startServer() {
   // Parse JSON request bodies
   app.use(express.json());
 
+  // CORS: Allow only the StockAI Vercel production origin (and local dev origins when not in production)
+  const allowedOrigins = [
+    "https://stock-app-fawn-three.vercel.app",
+  ];
+
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      if (
+        allowedOrigins.includes(origin) ||
+        (process.env.NODE_ENV !== "production" &&
+          /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin))
+      ) {
+        res.header("Access-Control-Allow-Origin", origin);
+        res.header("Vary", "Origin");
+      }
+    }
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
   // ============================================================
   // HEALTH CHECK
   // ============================================================
@@ -329,11 +354,21 @@ Provide your response in JSON format with this structure:
         const data: any = await response.json();
 
         if (data["Error Message"]) {
-          throw new Error(data["Error Message"]);
+          console.error(
+            `Alpha Vantage error response received for ${stock.displaySymbol}.`,
+          );
+          throw new Error(
+            `Alpha Vantage rejected request for ${stock.displaySymbol}.`,
+          );
         }
 
         if (data["Note"]) {
-          throw new Error(data["Note"]);
+          console.error(
+            `Alpha Vantage rate limit notice received for ${stock.displaySymbol}.`,
+          );
+          throw new Error(
+            `Alpha Vantage rate limit reached for ${stock.displaySymbol}.`,
+          );
         }
 
         if (data["Information"]) {
@@ -452,8 +487,7 @@ Provide your response in JSON format with this structure:
         return res.json(data);
       } catch (error) {
         return res.status(502).json({
-          error:
-            error instanceof Error ? error.message : "Stock refresh failed.",
+          error: "Stock refresh failed.",
         });
       }
     }
@@ -495,10 +529,7 @@ Provide your response in JSON format with this structure:
       }
 
       return res.status(502).json({
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to fetch stock data from Alpha Vantage.",
+        error: "Unable to fetch stock data from Alpha Vantage.",
       });
     } finally {
       stockRefreshPromise = null;

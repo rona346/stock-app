@@ -180,7 +180,8 @@ export default function App() {
   useEffect(() => {
     const fetchStocks = async () => {
       try {
-        const response = await fetch(`${process.env.BACKEND_URL}/api/stocks`);
+        const backendUrl = (process.env.BACKEND_URL || "").trim().replace(/\/$/, "");
+        const response = await fetch(`${backendUrl}/api/stocks`);
 
         if (!response.ok) {
           throw new Error("Failed to fetch stocks");

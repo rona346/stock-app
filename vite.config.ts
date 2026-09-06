@@ -5,11 +5,14 @@ import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
+  const backendUrl =
+    env.BACKEND_URL ||
+    (mode === "production" ? "https://stock-app-22he.onrender.com" : "");
+
   return {
     plugins: [react(), tailwindcss()],
     define: {
-      "process.env.GEMINI_API_KEY": JSON.stringify(env.GEMINI_API_KEY),
-      "process.env.BACKEND_URL": JSON.stringify(env.BACKEND_URL),
+      "process.env.BACKEND_URL": JSON.stringify(backendUrl.replace(/\/$/, "")),
     },
     resolve: {
       alias: {

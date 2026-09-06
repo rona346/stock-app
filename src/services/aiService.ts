@@ -3,7 +3,8 @@ import { StockData, AIRecommendation } from '../types';
 export async function getAIRecommendation(
   stocks: StockData[]
 ): Promise<AIRecommendation> {
-  const response = await fetch('/api/recommendation', {
+  const backendUrl = (process.env.BACKEND_URL || "").trim().replace(/\/$/, "");
+  const response = await fetch(`${backendUrl}/api/recommendation`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

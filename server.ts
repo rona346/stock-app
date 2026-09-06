@@ -335,13 +335,20 @@ Provide your response in JSON format with this structure:
         if (data["Note"]) {
           throw new Error(data["Note"]);
         }
+        
+        if (data["Information"]) {
+          console.error(
+            `Alpha Vantage rejected ${stock.symbol}: ${data["Information"]}`,
+          );
+
+          throw new Error(data["Information"]);
+        }
 
         const timeSeries = data["Time Series (Daily)"];
 
         if (!timeSeries) {
           console.error(
-            `Alpha Vantage response for ${stock.symbol}:`,
-            JSON.stringify(data, null, 2),
+            `Alpha Vantage returned no time-series data for ${stock.symbol}`,
           );
 
           throw new Error(

@@ -335,13 +335,14 @@ Provide your response in JSON format with this structure:
         if (data["Note"]) {
           throw new Error(data["Note"]);
         }
-        
+
         if (data["Information"]) {
           console.error(
-            `Alpha Vantage rejected ${stock.symbol}: ${data["Information"]}`,
+            `Alpha Vantage rejected ${stock.symbol}: API usage/rate limit or provider restriction.`,
           );
-
-          throw new Error(data["Information"]);
+          throw new Error(
+            `Alpha Vantage rejected the request for ${stock.symbol}.`,
+          );
         }
 
         const timeSeries = data["Time Series (Daily)"];

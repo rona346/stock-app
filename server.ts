@@ -5,6 +5,7 @@ dotenv.config({ path: ".env.local" });
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 
 let aiClient: GoogleGenAI | null = null;
@@ -57,6 +58,7 @@ async function startServer() {
     }
     res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.header("Access-Control-Max-Age", "86400");
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
     }
@@ -276,15 +278,17 @@ Provide your response in JSON format with this structure:
   // STOCK API CACHE + QUOTA PROTECTION
   // ==========================================================
 
-  let stocksCache: {
-    data: StockResult[];
-    timestamp: number;
-  } | null = null;
+  // Opportunistic runtime cache file on ephemeral disk.
+  // Never manually pre-seeded; only stores real data returned by Alpha Vantage.
+  const CACHE_FILE_PATH = path.join(process.cwd(), "stocks-cache.json");
 
-  // Alpha Vantage free tier protection.
-  // 10 stocks per refresh = 10 requests.
-  // Keep a safety margin below the 25 requests/day limit.
-  const MAX_DAILY_ALPHA_VANTAGE_REQUESTS = 20;
+  // In-memory per-symbol real stock cache
+  const cachedStocksMap = new Map<string, StockResult>();
+  let cacheLastUpdated = 0;
+
+  // Alpha Vantage free tier protection: 25 requests/day total limit.
+  // We keep a safety budget limit of 24.
+  const MAX_DAILY_ALPHA_VANTAGE_REQUESTS = 24;
 
   let alphaVantageUsage = {
     date: new Date().toISOString().slice(0, 10),
@@ -293,11 +297,11 @@ Provide your response in JSON format with this structure:
 
   // Prevent multiple simultaneous /api/stocks requests
   // from triggering duplicate Alpha Vantage calls.
-  let stockRefreshPromise: Promise<StockResult[]> | null = null;
+  let stockRefreshPromise: Promise<void> | null = null;
 
-  // Keep real data for 12 hours before attempting another full refresh.
-  // This prevents the frontend from repeatedly consuming the quota.
-  const CACHE_DURATION = 12 * 60 * 60 * 1000;
+  // Cache real daily market data for 24 hours.
+  // BSE daily closing prices only update once per trading day.
+  const CACHE_DURATION = 24 * 60 * 60 * 1000;
 
   const resetDailyUsageIfNeeded = () => {
     const today = new Date().toISOString().slice(0, 10);
@@ -310,26 +314,99 @@ Provide your response in JSON format with this structure:
     }
   };
 
+  const loadRuntimeCacheFromDisk = () => {
+    try {
+      if (fs.existsSync(CACHE_FILE_PATH)) {
+        const raw = fs.readFileSync(CACHE_FILE_PATH, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed?.data)) {
+          for (const item of parsed.data) {
+            if (item && item.symbol && typeof item.price === "number") {
+              cachedStocksMap.set(item.symbol, item);
+            }
+          }
+          cacheLastUpdated = Number(parsed.timestamp) || 0;
+          const today = new Date().toISOString().slice(0, 10);
+          if (
+            parsed.usage?.date === today &&
+            typeof parsed.usage.requests === "number"
+          ) {
+            alphaVantageUsage.requests = Math.max(
+              alphaVantageUsage.requests,
+              parsed.usage.requests,
+            );
+          }
+          console.log(
+            `Loaded ${cachedStocksMap.size} real stocks from runtime cache file.`,
+          );
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "Could not load runtime cache file:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  };
+
+  const saveRuntimeCacheToDisk = () => {
+    try {
+      const payload = {
+        data: Array.from(cachedStocksMap.values()),
+        timestamp: cacheLastUpdated,
+        usage: alphaVantageUsage,
+      };
+      fs.writeFileSync(
+        CACHE_FILE_PATH,
+        JSON.stringify(payload, null, 2),
+        "utf-8",
+      );
+    } catch (err) {
+      console.warn(
+        "Could not save runtime cache file:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  };
+
+  // Attempt to load runtime cache from disk on startup if available
+  loadRuntimeCacheFromDisk();
+
   const refreshStocksFromAlphaVantage = async (
     apiKey: string,
-  ): Promise<StockResult[]> => {
+  ): Promise<void> => {
     resetDailyUsageIfNeeded();
 
-    // Never start a refresh if we don't have enough daily budget
-    // for the complete 10-stock refresh.
-    if (
-      alphaVantageUsage.requests + stocks.length >
-      MAX_DAILY_ALPHA_VANTAGE_REQUESTS
-    ) {
+    // Check if we have daily safety budget left
+    if (alphaVantageUsage.requests >= MAX_DAILY_ALPHA_VANTAGE_REQUESTS) {
       throw new Error(
         `Alpha Vantage daily safety budget reached. Used ${alphaVantageUsage.requests}/${MAX_DAILY_ALPHA_VANTAGE_REQUESTS} requests.`,
       );
     }
 
-    const results: StockResult[] = [];
+    let newlyFetchedCount = 0;
 
-    for (const stock of stocks) {
+    for (let i = 0; i < stocks.length; i++) {
+      const stock = stocks[i];
+
+      // Stop if budget is reached during the loop
+      if (alphaVantageUsage.requests >= MAX_DAILY_ALPHA_VANTAGE_REQUESTS) {
+        console.warn(
+          `Daily Alpha Vantage budget reached (${alphaVantageUsage.requests}/${MAX_DAILY_ALPHA_VANTAGE_REQUESTS}). Halting refresh.`,
+        );
+        break;
+      }
+
       try {
+        // Obey Alpha Vantage free tier frequency limit (5 requests per minute).
+        // 12.5s delay between requests guarantees < 5 calls/min and avoids "Note" rate limits.
+        if (i > 0) {
+          console.log(
+            "Waiting 12.5s to respect Alpha Vantage 5 calls/min rate limit...",
+          );
+          await new Promise((resolve) => setTimeout(resolve, 12500));
+        }
+
         console.log(`Fetching ${stock.displaySymbol} from Alpha Vantage...`);
 
         const url =
@@ -341,9 +418,6 @@ Provide your response in JSON format with this structure:
 
         // Count every actual Alpha Vantage request.
         alphaVantageUsage.requests += 1;
-
-        // Alpha Vantage free tier requires requests to be spaced out.
-        await new Promise((resolve) => setTimeout(resolve, 1200));
 
         const response = await fetch(url);
 
@@ -420,7 +494,7 @@ Provide your response in JSON format with this structure:
             ? Number(((change / previous.price) * 100).toFixed(2))
             : 0;
 
-        results.push({
+        const stockResult: StockResult = {
           symbol: stock.displaySymbol,
           name: stock.name,
           price: latest.price,
@@ -428,12 +502,19 @@ Provide your response in JSON format with this structure:
           changePercent,
           history,
           dataDate: latest.time,
-        });
+        };
+
+        // Per-symbol cache update: update this symbol without touching others
+        cachedStocksMap.set(stock.displaySymbol, stockResult);
+        cacheLastUpdated = Date.now();
+        saveRuntimeCacheToDisk();
+        newlyFetchedCount++;
 
         console.log(
           `Successfully fetched ${stock.displaySymbol} - ${latest.time}`,
         );
       } catch (error) {
+        // Individual symbol failure must NOT destroy other symbols or previously cached data
         console.error(
           `Failed to fetch ${stock.displaySymbol}:`,
           error instanceof Error ? error.message : error,
@@ -442,14 +523,14 @@ Provide your response in JSON format with this structure:
     }
 
     console.log(
-      `Alpha Vantage usage today: ${alphaVantageUsage.requests}/${MAX_DAILY_ALPHA_VANTAGE_REQUESTS}`,
+      `Alpha Vantage usage today: ${alphaVantageUsage.requests}/${MAX_DAILY_ALPHA_VANTAGE_REQUESTS}. Real stocks in cache: ${cachedStocksMap.size}/${stocks.length}`,
     );
 
-    if (results.length === 0) {
+    saveRuntimeCacheToDisk();
+
+    if (cachedStocksMap.size === 0 && newlyFetchedCount === 0) {
       throw new Error("Unable to fetch any stock data from Alpha Vantage.");
     }
-
-    return results;
   };
 
   app.get("/api/stocks", async (req, res) => {
@@ -463,69 +544,93 @@ Provide your response in JSON format with this structure:
 
     resetDailyUsageIfNeeded();
 
-    // ==========================================================
-    // RETURN REAL CACHED DATA
-    // ==========================================================
+    const now = Date.now();
+    const isFresh =
+      cachedStocksMap.size === stocks.length &&
+      now - cacheLastUpdated < CACHE_DURATION;
 
-    if (stocksCache && Date.now() - stocksCache.timestamp < CACHE_DURATION) {
-      console.log("Returning cached REAL stock data.");
-
-      return res.json(stocksCache.data);
+    // ==========================================================
+    // 1. RETURN FRESH REAL CACHED DATA
+    // ==========================================================
+    if (isFresh) {
+      console.log("Returning fresh cached REAL stock data.");
+      return res.json(Array.from(cachedStocksMap.values()));
     }
 
     // ==========================================================
-    // PREVENT DUPLICATE REFRESHES
+    // 2. STALE REAL DATA FALLBACK IF DAILY BUDGET EXHAUSTED
     // ==========================================================
+    if (
+      alphaVantageUsage.requests >= MAX_DAILY_ALPHA_VANTAGE_REQUESTS &&
+      cachedStocksMap.size > 0
+    ) {
+      console.warn(
+        `Alpha Vantage daily safety budget reached (${alphaVantageUsage.requests}/${MAX_DAILY_ALPHA_VANTAGE_REQUESTS}). Serving existing REAL stock data.`,
+      );
+      return res.json(Array.from(cachedStocksMap.values()));
+    }
 
+    // ==========================================================
+    // 3. PREVENT DUPLICATE REFRESHES & SERVE IMMEDIATE REAL DATA
+    // ==========================================================
     if (stockRefreshPromise) {
+      // If we already have real cached data, serve it immediately rather than making the client wait
+      if (cachedStocksMap.size > 0) {
+        console.log(
+          "Stock refresh in progress. Serving existing REAL stock data immediately.",
+        );
+        return res.json(Array.from(cachedStocksMap.values()));
+      }
+
       console.log(
-        "Stock refresh already in progress. Waiting for existing request...",
+        "Stock refresh already in progress on cold start. Waiting for existing request...",
       );
 
       try {
-        const data = await stockRefreshPromise;
-        return res.json(data);
+        await stockRefreshPromise;
       } catch (error) {
-        return res.status(502).json({
-          error: "Stock refresh failed.",
-        });
+        // Handled below
       }
+
+      if (cachedStocksMap.size > 0) {
+        return res.json(Array.from(cachedStocksMap.values()));
+      }
+
+      return res.status(502).json({
+        error: "Stock refresh failed.",
+      });
     }
 
     // ==========================================================
-    // START ONE CONTROLLED REFRESH
+    // 4. START ONE CONTROLLED REFRESH
     // ==========================================================
-
     stockRefreshPromise = refreshStocksFromAlphaVantage(apiKey);
 
     try {
-      const results = await stockRefreshPromise;
+      await stockRefreshPromise;
 
-      // Only replace the cache when we received a valid result.
-      // This prevents a failed refresh from destroying
-      // previously cached REAL data.
-      stocksCache = {
-        data: results,
-        timestamp: Date.now(),
-      };
+      if (cachedStocksMap.size > 0) {
+        console.log(
+          `Serving real stocks: ${cachedStocksMap.size}/${stocks.length} available`,
+        );
+        return res.json(Array.from(cachedStocksMap.values()));
+      }
 
-      console.log(
-        `Stock refresh complete: ${results.length}/${stocks.length} stocks`,
-      );
-
-      return res.json(results);
+      return res.status(502).json({
+        error: "Unable to fetch stock data from Alpha Vantage.",
+      });
     } catch (error) {
       console.error(
         "Stock refresh failed:",
         error instanceof Error ? error.message : error,
       );
 
-      // If we already have REAL cached data, return it.
-      // Never generate fake/simulated prices.
-      if (stocksCache) {
-        console.log("Returning previously cached REAL stock data.");
-
-        return res.json(stocksCache.data);
+      // Stale real data fallback: never return 502 if any real stock data exists
+      if (cachedStocksMap.size > 0) {
+        console.log(
+          "Returning previously cached REAL stock data after refresh error.",
+        );
+        return res.json(Array.from(cachedStocksMap.values()));
       }
 
       return res.status(502).json({

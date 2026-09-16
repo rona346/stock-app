@@ -63,9 +63,7 @@ export default function App() {
 
   const [stocks, setStocks] = useState<StockData[]>([]);
   const latestStocksRef = useRef<StockData[]>([]);
-  useEffect(() => {
-    latestStocksRef.current = stocks;
-  }, [stocks]);
+  latestStocksRef.current = stocks;
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioItem[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -207,7 +205,7 @@ export default function App() {
     if (!user || stocks.length === 0) return;
 
     const fetchAI = async () => {
-      const currentStocks = latestStocksRef.current;
+      const currentStocks = stocks;
 
       if (currentStocks.length === 0) return;
 
@@ -236,8 +234,8 @@ export default function App() {
 
   const refreshAIRecommendation = async () => {
     console.log("Refresh AI button clicked");
-    console.log("Current stocks:", latestStocksRef.current);
-    const currentStocks = latestStocksRef.current;
+    console.log("Current stocks:", stocks);
+    const currentStocks = stocks;
 
     if (currentStocks.length === 0) return;
 

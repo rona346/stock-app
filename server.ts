@@ -24,6 +24,9 @@ function getGoogleGenAI(): GoogleGenAI {
         headers: {
           "User-Agent": "aistudio-build",
         },
+        retryOptions: {
+          attempts: 3,
+        },
       },
     });
   }
@@ -182,6 +185,12 @@ Provide your response in JSON format with this structure:
       if (status === 429) {
         return res.status(429).json({
           error: "Gemini API quota exceeded. Please try again later.",
+        });
+      }
+
+      if (status === 503) {
+        return res.status(503).json({
+          error: "Gemini AI is temporarily busy. Please try again in a moment.",
         });
       }
 
